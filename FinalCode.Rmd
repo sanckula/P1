@@ -1,0 +1,349 @@
+---
+title: "Initial Report"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# STEP 1: Preliminary Data Analysis
+Load data
+```{r}
+creditcard <- read.csv("/home/sanckula/Desktop/temp/RESULTS/creditcard.csv")
+```
+# Examine header descriptions and dimensional size of data
+```{r}
+head(creditcard)
+dim(creditcard)
+```
+# check for missing values
+```{r}
+sum(as.numeric(is.na(creditcard)))
+```
+
+# Description of each variable
+```{r}
+str(creditcard) 
+```
+# Basic statistical info of each variable
+```{r}
+summary(creditcard) 
+```
+
+# Basic statistical info of all class 0 labels
+```{r}
+summary(creditcard[creditcard$Class==0,]) 
+```
+# Basic statistical info of all class 1 labels
+```{r}
+summary(creditcard[creditcard$Class==1,]) 
+```
+
+
+# Examine for features that are highly correlated with a cut off of 0.75
+```{r}
+library(caret)
+correlationMatrix <- cor(creditcard[,1:30])
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.75)
+names(creditcard[,1:30])[highlyCorrelated]
+```
+
+
+# STEP 2: Split Data into Training and Testing Subset
+# Set seed to reproduce results
+```{r}
+set.seed(23)
+```
+
+# Sampling indexes
+```{r}
+data = creditcard
+indexes = sample(1:nrow(data), size=0.3*nrow(data))
+```
+
+# Split data
+```{r}
+test = data[indexes,]
+dim(test)  
+
+train = data[-indexes,]
+dim(train) 
+
+data_train<-train[,c(31,2:30)]
+data_test<-test[,c(2:30)]
+
+train_labels<-train[,c(31)]
+test_labels<-test[,c(31)]
+```
+
+# STEP 3: Experiment 1 - Multiple Logistic Regression
+```{r}
+library(gmodels) #Crosstable
+reg_1 <- glm(Class~.,data=data_train)
+reg_1
+summary(reg_1)
+prediction <- predict(reg_1, newdata =data_test)
+```
+# Examine details of prediction fit
+```{r}
+min(prediction)
+max(prediction)
+min(prediction[test_labels==1])
+max(prediction[test_labels==1])
+min(prediction[test_labels==0])
+max(prediction[test_labels==0])
+```
+# Modify cut-off threshold and generate Cross Tables
+```{r}
+for (CUTOFF in c(0.0001,0.005,0.01,0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1,1.1,1.2))
+     {
+  print(CUTOFF)
+  P2<-prediction
+  P2[P2>=CUTOFF]<-1
+  P2[P2<CUTOFF]<-0
+  CrossTable(x=test_labels,y=P2)
+  }
+```
+
+#STEP 4: Experiment 2 – Variable Selection and Multiple Logistic Regression
+```{r}
+library(MASS) # stepwise regression
+library(leaps) # all subsets regression
+full <- glm(Class~.,data=data_train)
+null <- glm(Class~1,data=data_train)
+stepF <- stepAIC(null, scope=list(lower=null, upper=full), direction= "forward", trace=TRUE)
+reg_2 <- glm(Class~V17 + V14 + V12 + V10 + V16 + V3 + V7 + V11 + V4 + V18 ,data=data_train)
+reg_2
+summary(reg_2)
+prediction <- predict(reg_2, newdata =data_test)
+for (CUTOFF in c(0.0001,0.005,0.01,0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1,1.1,1.2))
+     {
+  print(CUTOFF)
+  P2<-prediction
+  P2[P2>=CUTOFF]<-1
+  P2[P2<CUTOFF]<-0
+  CrossTable(x=test_labels,y=P2)
+  }
+
+```
+
+#STEP 5: Experiment 3 – Naïve Bayes Classifier (70/30 split on Training and Testing)
+# Factor class label
+```{r}
+library(naivebayes) #naive bayes
+
+creditcard$Class<-factor(creditcard$Class)
+# Sampling indexes
+```{r}
+data = creditcard
+indexes = sample(1:nrow(data), size=0.3*nrow(data))
+```
+# Split data
+```{r}
+test = data[indexes,]
+dim(test)  
+
+train = data[-indexes,]
+dim(train) 
+
+data_train<-train[,c(31,2:30)]
+data_test<-test[,c(2:30)]
+
+train_labels<-train[,c(31)]
+test_labels<-test[,c(31)]
+
+NB<-naive_bayes(Class~.,data=data_train)
+plot(NB,ask=TRUE)
+PRED<-predict(NB,newdata=data_test)
+CrossTable(x=test_labels,y=PRED)
+```
+
+#STEP 6: Experiment 4 – Naïve Bayes Classifier (Stratified K fold partitioning)
+```{r}
+library(caret)
+folds <- createFolds(factor(creditcard$Class), k = 5, list = FALSE)
+data = creditcard
+```
+# Repeat Process for each k fold
+```{r}
+for (k in c(1,2,3,4,5)){
+  print(k)
+
+train<-data[folds!=k,]
+test<-data[folds==k,]
+
+data_train<-train[,c(31,2:30)]
+data_test<-test[,c(2:30)]
+
+train_labels<-train[,c(31)]
+test_labels<-test[,c(31)]
+NB<-naive_bayes(Class~.,data=data_train)
+PRED<-predict(NB,newdata=data_test)
+CrossTable(x=test_labels,y=PRED)
+}
+```
+
+
+#Step 7: Experiment 5 – Decision Tree with Stratified K fold partitioning with K=5
+# Implement Decision trees Classification  with rpart
+```{r}
+library(rpart)
+```
+
+# Grow tree for each k fold and predict
+```{r}
+for (k in c(1,2,3,4,5)){
+  print(k)
+  
+  train<-data[folds!=k,]
+  test<-data[folds==k,]
+  
+  data_train<-train[,c(31,2:30)]
+  data_test<-test[,c(2:30)]
+  
+  train_labels<-train[,c(31)]
+  test_labels<-test[,c(31)]
+  
+fit <- rpart(Class ~.,method="class",data=data_train)
+varImp(fit)
+plot(fit)
+text(fit)
+printcp(fit) # display the results
+summary(fit) # detailed summayr of splits
+
+CrossTable(predict(fit,newdata=data_test,type = "class"),test_labels)
+
+}
+```
+
+
+# Step 8: Experiment 6 – Decision Tree with Synthetic Sampling of data
+# Explore use of synthetic sampling for complete set of data
+```{r}
+data = creditcard
+data_train<-data[,c(31,2:30)]
+```
+
+#install.packages("unbalanced")
+```{r}
+library(unbalanced)
+```
+# Use ubRacing to implement the Racing algorithm for selecting the best technique to re-balance or remove noisy instances in unbalanced datasets with decision trees
+
+```{r}
+ubConf <- list(type="ubUnder", percOver=200, percUnder=200, k=2, perc=50, method="percPos", w=NULL)
+results <- ubRacing(Class ~., data_train, "rpart", positive=1, ubConf=ubConf)
+```
+# Selected ubOver
+```{r}
+output<-data_train[ ,1]
+input<-data_train[ ,-1]
+
+data<-ubOver(X=input, Y= output)
+Class<-data$Y
+newData<-cbind(data$X, Class)
+
+dim(newData)
+```
+
+# Perform stratified K fold testing with new data
+```{r}
+folds <- createFolds(factor(newData$Class), k = 5, list = FALSE)
+data = newData
+```
+# Repeat Process for each k fold
+# Grow tree for each k fold and predict
+```{r}
+for (k in c(1,2,3,4,5)){
+  print(k)
+  
+  train<-data[folds!=k,]
+  test<-data[folds==k,]
+  
+  data_train<-train[,c(30,1:29)]
+  data_test<-test[,c(1:29)]
+  
+  train_labels<-train[,c(30)]
+  test_labels<-test[,c(30)]
+  
+fit <- rpart(Class ~.,method="class",data=data_train)
+varImp(fit)
+plot(fit)
+text(fit)
+printcp(fit) # display the results
+summary(fit) # detailed summary of splits
+
+CrossTable(predict(fit,newdata=data_test,type = "class"),test_labels)
+
+}
+```
+
+
+# Step 9: Experiment 7 – Decision Tree incorporating Time attribute 
+# Examine where Time falls in terms of variables of importance
+
+```{r}
+data = creditcard
+```
+# Time is the seconds between each transaction and the first transaction that is considered in the database
+# Over the course of 2 days, minimum is 0 and maximum is 172792
+# Thus from 0 - 86399 is day 1 
+# and from 86400 to 172792 is day 2
+# Seek to bin values by hour of day they occured then use day 1 to predict day 2
+
+# Compute hour and assign to variable TImehr
+```{r}
+data$Timehr<-(data$Time/60)/60
+```
+# Split into day 1 and day 2
+```{r}
+day1<-data[data$Timehr<24,]
+day2<-data[data$Timehr>=24,]
+```
+# Convert hours in day 2 to fall from 1-24 as opposed to 24-48
+```{r}
+day2$Timehr<-(day2$Timehr-24)
+```
+# Bin day1 and day2 by hours with new variable HOURBIN
+#fill column with zeros
+```{r}
+day1$HOURBIN<-0
+day2$HOURBIN<-0
+for (k in c(seq(24,1,-1))){
+#  print(k)
+day1$HOURBIN[day1$Timehr<k]<-k
+day2$HOURBIN[day2$Timehr<k]<-k
+}
+```
+head(day1)
+# Train with day 1 and use decision trees for day 2
+```{r}
+  data_train<-day1[,c(31,2:30,33)]
+  data_test<-day2[,c(2:30,33)]
+  
+  train_labels<-day1[,c(31)]
+  test_labels<-day2[,c(31)]
+  
+fit <- rpart(Class ~.,method="class",data=data_train)
+varImp(fit)
+plot(fit)
+text(fit)
+printcp(fit) # display the results
+summary(fit) # detailed summary of splits
+
+CrossTable(predict(fit,newdata=data_test,type = "class"),test_labels)
+```
+
+#barplots comparing impact
+```{r}
+counts<-table(day1$Class,day1$HOURBIN)
+barplot(counts,col=c("darkblue","red"))
+
+counts<-table(day2$Class,day2$HOURBIN)
+barplot(counts,col=c("darkblue","red"))
+```
+
+# V17 V12 V26  V3 V27 V4
+```{r}
+pairs(day1[c(31,18,13, 27, 4,28,5,33)],col=day1$Class,lower.panel=NULL)
+```
+
